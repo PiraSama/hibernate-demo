@@ -1,0 +1,23 @@
+<hibernate-configuration>
+    <session-factory>
+
+        <property name="hibernate.connection.driver_class">com.mysql.cj.jdbc.Driver</property>
+        <property name="hibernate.connection.url">
+            jdbc:mysql://localhost:3306/multilang_product?useSSL=false&amp;serverTimezone=UTC&amp;useUnicode=true&amp;characterEncoding=UTF-8
+        </property>
+        <property name="hibernate.connection.username">root</property>
+        <property name="hibernate.connection.password">quocthang__2004</property>
+
+        <property name="hibernate.hbm2ddl.auto">update</property>
+        <property name="hibernate.show_sql">true</property>
+        <property name="hibernate.format_sql">true</property>
+
+        <!-- Các entity được Hibernate quản lý -->
+        <mapping class="org.example.multilangproduct.entity.Language"/>
+        <mapping class="org.example.multilangproduct.entity.Product"/>
+        <mapping class="org.example.multilangproduct.entity.ProductTranslation"/>
+        <mapping class="org.example.multilangproduct.entity.ProductCategory"/>
+        <mapping class="org.example.multilangproduct.entity.ProductCategoryTranslation"/>
+
+    </session-factory>
+</hibernate-configuration>
