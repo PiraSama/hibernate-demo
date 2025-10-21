@@ -41,13 +41,24 @@ public class Language implements Serializable {
         this.code = code;
     }
 
-    // --- Getters and Setters ---
+    // --- Getters and Setters Tiêu chuẩn ---
     public String getLanguageId() { return languageId; }
     public void setLanguageId(String languageId) { this.languageId = languageId; }
     public String getLanguageName() { return languageName; }
     public void setLanguageName(String languageName) { this.languageName = languageName; }
     public String getCode() { return code; }
     public void setCode(String code) { this.code = code; }
+
+    // --- Getters Alias KHẮC PHỤC LỖI TÊN PHƯƠNG THỨC trong ProductUI ---
+    // Đây là các phương thức ProductUI đang cố gắng gọi
+    public String getLangCode() {
+        return this.code;
+    }
+
+    public String getLangName() {
+        return this.languageName;
+    }
+    // -----------------------------------------------------------------
 
     public Set<ProductTranslation> getProductTranslations() { return productTranslations; }
     public void setProductTranslations(Set<ProductTranslation> productTranslations) { this.productTranslations = productTranslations; }

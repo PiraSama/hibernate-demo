@@ -21,7 +21,11 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.*;
+import java.util.Map;
+import java.util.Optional;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.stream.Collectors;
 
 public class ProductUI extends JFrame {
     private final ProductService productService;
@@ -32,22 +36,34 @@ public class ProductUI extends JFrame {
     private JTable productTable;
     private DefaultTableModel tableModel;
 
-    private JTextField idField, enNameField, vnNameField, priceField;
+    private JTextField idField, priceField;
     private JComboBox<String> categoryCombo;
     private Map<String, Integer> categoryMap;
     private JButton addButton, updateButton, deleteButton;
     private boolean isLoading = false;
 
+    // PHẦN MỚI CHO ĐA NGÔN NGỮ
+    private JComboBox<String> languageCombo;
+    // Map: Tên ngôn ngữ -> Mã ngôn ngữ
+    private Map<String, String> langNameToCodeMap;
+    private List<Language> allLanguages;
+    private String currentLangCode = "en";
+
+    // KHAI BÁO MỚI CHO TRƯỜNG DỊCH ĐỘNG
+    private JPanel translationFieldsPanel;
+    // Map: Mã ngôn ngữ -> JTextField
+    private Map<String, JTextField> translationFieldsMap;
+
     public ProductUI() {
         FlatMaterialLighterIJTheme.setup(); // 🌈 giao diện Material Design sáng
-        UIManager.put("defaultFont", new Font("Segoe UI", Font.PLAIN, 14));
+
+        // ✨ SỬA FONT: Dùng 'Dialog' để đảm bảo hỗ trợ Unicode CJK (Tiếng Trung/Nhật) tốt hơn
+        UIManager.put("defaultFont", new Font("Dialog", Font.PLAIN, 14));
         UIManager.put("Button.arc", 12);
         UIManager.put("Component.arc", 10);
         UIManager.put("TextComponent.arc", 10);
-        // ✨ THAY ĐỔI: Bật lại đường kẻ bảng để dễ phân biệt hơn
         UIManager.put("Table.showVerticalLines", true);
         UIManager.put("Table.showHorizontalLines", true);
-        // ✨ MỚI: Tùy chỉnh màu của đường kẻ cho nhẹ nhàng
         UIManager.put("Table.gridColor", new Color(220, 220, 220));
 
 
@@ -56,7 +72,11 @@ public class ProductUI extends JFrame {
         this.categoryDAO = new ProductCategoryDAO();
         this.languageDAO = new LanguageDAO();
 
+        // Tải tất cả ngôn ngữ một lần khi khởi tạo
+        this.allLanguages = productService.getAllActiveLanguages();
+
         initializeUI();
+        // Bắt đầu với ngôn ngữ mặc định là 'en'
         loadProducts();
     }
 
@@ -69,13 +89,12 @@ public class ProductUI extends JFrame {
         ((JPanel) getContentPane()).setBorder(new EmptyBorder(10, 10, 10, 10));
 
         // ====== BẢNG SẢN PHẨM ======
-        String[] columns = {"ID", "Tên (EN)", "Tên (VN)", "Giá", "Danh mục (EN)"};
+        String[] columns = {"ID", "Tên Sản Phẩm", "Giá", "Danh mục"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public Class<?> getColumnClass(int columnIndex) {
-                // ✨ THAY ĐỔI: Cột giá nên là BigDecimal hoặc Number để sắp xếp đúng
                 if (columnIndex == 0) return Integer.class;
-                if (columnIndex == 3) return BigDecimal.class;
+                if (columnIndex == 2) return BigDecimal.class;
                 return String.class;
             }
 
@@ -86,33 +105,36 @@ public class ProductUI extends JFrame {
         };
 
         productTable = new JTable(tableModel);
-        productTable.setRowHeight(30); // ✨ Tăng chiều cao dòng một chút
+        productTable.setRowHeight(30);
+        productTable.setFont(new Font("Dialog", Font.PLAIN, 14)); // Đảm bảo bảng hiển thị đúng ký tự
         productTable.setSelectionBackground(new Color(120, 180, 255));
-        productTable.setIntercellSpacing(new Dimension(0, 0)); // ✨ Xóa khoảng cách thừa
+        productTable.setIntercellSpacing(new Dimension(0, 0));
 
-        // ✨ MỚI: Căn giữa và làm đậm tiêu đề cột
         JTableHeader tableHeader = productTable.getTableHeader();
-        tableHeader.setFont(new Font("Segoe UI", Font.BOLD, 15)); // Tăng cỡ chữ và làm đậm
+        tableHeader.setFont(new Font("Dialog", Font.BOLD, 15));
         tableHeader.setOpaque(false);
         tableHeader.setBackground(new Color(242, 242, 242));
         DefaultTableCellRenderer headerRenderer = (DefaultTableCellRenderer) tableHeader.getDefaultRenderer();
         headerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
 
-        // ✨ MỚI: Căn giữa nội dung cho các cột ID và Giá
-        DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
-        centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
-        productTable.getColumnModel().getColumn(0).setCellRenderer(centerRenderer); // Cột ID
-
-        DefaultTableCellRenderer priceRenderer = new DefaultTableCellRenderer();
-        priceRenderer.setHorizontalAlignment(SwingConstants.RIGHT); // Căn phải cho giá đẹp hơn
-        productTable.getColumnModel().getColumn(3).setCellRenderer(priceRenderer); // Cột Giá
-        productTable.getColumnModel().getColumn(0).setMaxWidth(80); // Giới hạn chiều rộng cột ID
-
-
         JScrollPane scrollPane = new JScrollPane(productTable);
         scrollPane.setBorder(BorderFactory.createTitledBorder("Danh sách sản phẩm"));
 
-        JButton refreshButton = new JButton("Làm mới");
+        // ====== KHU VỰC ĐIỀU KHIỂN TRÊN CÙNG (CHUYỂN NGÔN NGỮ & REFRESH) ======
+        languageCombo = new JComboBox<>();
+        languageCombo.setFont(new Font("Dialog", Font.PLAIN, 14)); // Đảm bảo ComboBox hiển thị đúng ký tự CJK
+        loadLanguagesIntoCombo();
+
+        languageCombo.addActionListener(e -> {
+            if (!isLoading && languageCombo.getSelectedItem() != null) {
+                String langName = (String) languageCombo.getSelectedItem();
+                // Lấy mã ngôn ngữ từ tên đã chọn
+                currentLangCode = langNameToCodeMap.getOrDefault(langName, "en");
+                loadProducts();
+            }
+        });
+
+        JButton refreshButton = new JButton("Làm mới & Xóa Form");
         refreshButton.addActionListener(e -> {
             if (!isLoading) {
                 clearForm();
@@ -121,55 +143,66 @@ public class ProductUI extends JFrame {
             }
         });
 
+        JPanel langRefreshPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 5));
+        langRefreshPanel.add(new JLabel("Ngôn ngữ Hiển thị:"));
+        langRefreshPanel.add(languageCombo);
+        langRefreshPanel.add(refreshButton);
+
         JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.add(langRefreshPanel, BorderLayout.NORTH);
         topPanel.add(scrollPane, BorderLayout.CENTER);
-        topPanel.add(refreshButton, BorderLayout.SOUTH);
         add(topPanel, BorderLayout.CENTER);
 
-        // ====== FORM NHẬP DỮ LIỆU ======
-        JPanel formPanel = new JPanel(new MigLayout("wrap 2, fillx", "[150][grow]"));
-        formPanel.setBorder(BorderFactory.createTitledBorder("📝 Thêm / Sửa Bản dịch"));
+        // ====== FORM NHẬP DỮ LIỆU ĐA NGÔN NGỮ ======
+        JPanel formWrapperPanel = new JPanel(new MigLayout("wrap 2, fillx", "[150][grow]"));
+        formWrapperPanel.setBorder(BorderFactory.createTitledBorder("📝 Quản lý Sản phẩm & Bản dịch"));
 
         idField = new JTextField();
         idField.setEnabled(false);
         priceField = new JTextField();
-        enNameField = new JTextField();
-        vnNameField = new JTextField();
         categoryCombo = new JComboBox<>();
         loadCategoriesIntoCombo();
 
-        formPanel.add(new JLabel("Mã Sản Phẩm (ID):"));
-        formPanel.add(idField, "growx");
-        formPanel.add(new JLabel("Giá ($):"));
-        formPanel.add(priceField, "growx");
-        formPanel.add(new JLabel("Danh mục:"));
-        formPanel.add(categoryCombo, "growx");
-        formPanel.add(new JLabel("Tên (EN):"));
-        formPanel.add(enNameField, "growx");
-        formPanel.add(new JLabel("Tên (VN):"));
-        formPanel.add(vnNameField, "growx");
+        // 1. CÁC TRƯỜNG CỐ ĐỊNH (ID, GIÁ, DANH MỤC)
+        formWrapperPanel.add(new JLabel("Mã SP (ID):"));
+        formWrapperPanel.add(idField, "growx");
+        formWrapperPanel.add(new JLabel("Giá ($):"));
+        formWrapperPanel.add(priceField, "growx");
+        formWrapperPanel.add(new JLabel("Danh mục:"));
+        formWrapperPanel.add(categoryCombo, "growx");
 
+        // 2. PANEL CHỨA CÁC TRƯỜNG DỊCH THUẬT ĐỘNG
+        translationFieldsPanel = new JPanel(new MigLayout("wrap 2, fillx", "[150][grow]"));
+        JScrollPane translationScrollPane = new JScrollPane(translationFieldsPanel);
+        translationScrollPane.setPreferredSize(new Dimension(400, 150));
+        translationScrollPane.setBorder(BorderFactory.createTitledBorder("Bản dịch Tên Sản phẩm (Tất cả ngôn ngữ)"));
+
+        formWrapperPanel.add(translationScrollPane, "span 2, growx, pushx");
+
+        // Khởi tạo các trường nhập liệu bản dịch khi UI load
+        createDynamicTranslationFields();
+
+
+        // 3. CÁC NÚT HÀNH ĐỘNG
         addButton = new JButton("Thêm Mới");
         updateButton = new JButton("Cập nhật");
         deleteButton = new JButton("Xóa");
 
-        // ✨ MỚI: Thêm màu sắc cho các nút để sinh động và trực quan
-        addButton.setBackground(new Color(46, 204, 113)); // Xanh lá
+        addButton.setBackground(new Color(46, 204, 113));
         addButton.setForeground(Color.WHITE);
-        updateButton.setBackground(new Color(52, 152, 219)); // Xanh dương
+        updateButton.setBackground(new Color(52, 152, 219));
         updateButton.setForeground(Color.WHITE);
-        deleteButton.setBackground(new Color(231, 76, 60)); // Đỏ
+        deleteButton.setBackground(new Color(231, 76, 60));
         deleteButton.setForeground(Color.WHITE);
-
 
         JPanel btnPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 5));
         btnPanel.add(addButton);
         btnPanel.add(updateButton);
         btnPanel.add(deleteButton);
 
-        formPanel.add(new JLabel(), "growx");
-        formPanel.add(btnPanel, "growx");
-        add(formPanel, BorderLayout.SOUTH);
+        formWrapperPanel.add(new JLabel(), "growx");
+        formWrapperPanel.add(btnPanel, "growx");
+        add(formWrapperPanel, BorderLayout.SOUTH);
 
         // ====== SỰ KIỆN ======
         addButton.addActionListener(new AddProductListener());
@@ -180,35 +213,122 @@ public class ProductUI extends JFrame {
             if (!e.getValueIsAdjusting() && productTable.getSelectedRow() != -1) {
                 int row = productTable.getSelectedRow();
                 Integer productId = (Integer) tableModel.getValueAt(row, 0);
-                Optional<Product> productOpt = productDAO.getProductById(productId);
-                productOpt.ifPresent(p -> {
-                    idField.setText(p.getProductId().toString());
-                    priceField.setText(p.getPrice().toPlainString());
-                    enNameField.setText((String) tableModel.getValueAt(row, 1));
-                    vnNameField.setText((String) tableModel.getValueAt(row, 2));
-                    categoryCombo.setSelectedItem(tableModel.getValueAt(row, 4));
-                    // Khi chọn sản phẩm để sửa, không cho sửa giá và danh mục
-                    priceField.setEnabled(false);
-                    categoryCombo.setEnabled(false);
-                });
+                loadProductDetailsToForm(productId);
             }
         });
     }
 
-    // ====== LOAD DỮ LIỆU ======
+    // PHƯƠNG THỨC: Tải ngôn ngữ vào JComboBox
+    private void loadLanguagesIntoCombo() {
+        languageCombo.removeAllItems();
+        langNameToCodeMap = new LinkedHashMap<>(); // Sửa: Dùng Map Tên -> Mã để tra cứu dễ hơn
+
+        if (allLanguages.isEmpty()) {
+            languageCombo.addItem("⚠️ Không có ngôn ngữ nào");
+            return;
+        }
+
+        try {
+            for (Language lang : allLanguages) {
+                String langName = lang.getLangName();
+                String langCode = lang.getLangCode();
+                langNameToCodeMap.put(langName, langCode); // Lưu trữ Tên -> Mã
+                languageCombo.addItem(langName); // Hiển thị Tên trong Combo
+            }
+
+            // Chọn ngôn ngữ mặc định (Tiếng Anh)
+            String defaultLangName = allLanguages.stream()
+                    .filter(lang -> lang.getLangCode().equals("en"))
+                    .map(Language::getLangName)
+                    .findFirst()
+                    .orElse(null);
+
+            if (defaultLangName != null) {
+                languageCombo.setSelectedItem(defaultLangName);
+            } else if (languageCombo.getItemCount() > 0) {
+                languageCombo.setSelectedIndex(0);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            languageCombo.addItem("⚠️ Lỗi tải ngôn ngữ");
+        }
+    }
+
+
+    // PHƯƠNG THỨC MỚI: Tạo các JTextField động cho tất cả ngôn ngữ
+    private void createDynamicTranslationFields() {
+        translationFieldsPanel.removeAll();
+        translationFieldsMap = new LinkedHashMap<>();
+
+        // Lặp qua tất cả các ngôn ngữ đang hoạt động
+        for (Language lang : allLanguages) {
+            String langName = lang.getLangName();
+            String langCode = lang.getLangCode();
+
+            JTextField textField = new JTextField();
+
+            // Đặt font rõ ràng cho trường nhập liệu để hiển thị CJK
+            textField.setFont(new Font("Dialog", Font.PLAIN, 14));
+
+            if (langCode.equals("en")) {
+                textField.setToolTipText("Bản dịch Tiếng Anh là BẮT BUỘC");
+            }
+
+            translationFieldsPanel.add(new JLabel("Tên (" + langName + "):"));
+            translationFieldsPanel.add(textField, "growx");
+            translationFieldsMap.put(langCode, textField);
+        }
+
+        translationFieldsPanel.revalidate();
+        translationFieldsPanel.repaint();
+    }
+
+    // PHƯƠNG THỨC MỚI: Tải chi tiết sản phẩm vào form (bao gồm bản dịch)
+    private void loadProductDetailsToForm(Integer productId) {
+        Optional<Product> productOpt = productDAO.getProductById(productId);
+        if (productOpt.isEmpty()) return;
+
+        Product p = productOpt.get();
+
+        // Cập nhật các trường cố định
+        idField.setText(p.getProductId().toString());
+        priceField.setText(p.getPrice().toPlainString());
+
+        // Khi chọn sản phẩm để sửa, không cho sửa giá và danh mục
+        priceField.setEnabled(false);
+        categoryCombo.setEnabled(false);
+
+        // Cập nhật Danh mục (tên category lấy theo ngôn ngữ EN)
+        String catNameEn = categoryDAO.getCategoryNameByLanguage(p.getCategory().getProductCategoryId(), "en")
+                .orElse("Category " + p.getCategory().getProductCategoryId());
+        categoryCombo.setSelectedItem(catNameEn);
+
+        // Xóa nội dung cũ trong các trường dịch thuật
+        translationFieldsMap.values().forEach(field -> field.setText(""));
+
+        // Tải các bản dịch vào các trường nhập liệu động
+        for (String langCode : translationFieldsMap.keySet()) {
+            productDAO.getTranslationByIdAndLang(productId, langCode).ifPresent(pt -> {
+                translationFieldsMap.get(langCode).setText(pt.getProductName());
+            });
+        }
+    }
+
+    // ====== LOAD DỮ LIỆU (Giữ nguyên) ======
     private void loadCategoriesIntoCombo() {
         categoryCombo.removeAllItems();
         categoryMap = new HashMap<>();
         try {
+            // Lấy mã ID của ngôn ngữ EN (vì DAO cần ID hoặc code)
             Language enLang = languageDAO.getByCode("en");
             if (enLang == null) {
                 categoryCombo.addItem("❌ Thiếu Ngôn ngữ EN");
-                JOptionPane.showMessageDialog(this, "Vui lòng chạy MainApp để khởi tạo ngôn ngữ EN!");
                 return;
             }
 
             List<ProductCategory> categories = categoryDAO.getAllCategories();
             for (ProductCategory cat : categories) {
+                // Lấy tên danh mục bằng Tiếng Anh
                 String name = categoryDAO.getCategoryNameByLanguage(cat.getProductCategoryId(), "en")
                         .orElse("Category " + cat.getProductCategoryId());
                 categoryMap.put(name, cat.getProductCategoryId());
@@ -225,30 +345,46 @@ public class ProductUI extends JFrame {
     private void loadProducts() {
         if (isLoading) return;
         isLoading = true;
-        // ✨ Lưu lại dòng đang chọn
         int selectedRow = productTable.getSelectedRow();
+
+        // Lấy tên ngôn ngữ hiển thị
+        String langName = langNameToCodeMap.entrySet().stream()
+                .filter(entry -> entry.getValue().equals(currentLangCode))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse("Product");
+
+        tableModel.setColumnIdentifiers(new String[]{"ID", "Tên (" + langName + ")", "Giá", "Danh mục"});
 
         tableModel.setRowCount(0);
         try {
-            List<ProductDisplayDTO> enList = productService.getProductsForDisplay("en");
-            Map<Integer, String> vnMap = new HashMap<>();
-            productService.getProductsForDisplay("vi")
-                    .forEach(dto -> vnMap.put(dto.getProductId(), dto.getProductName()));
+            List<ProductDisplayDTO> products = productService.getProductsForDisplay(currentLangCode);
 
-            for (ProductDisplayDTO dto : enList) {
+            for (ProductDisplayDTO dto : products) {
                 tableModel.addRow(new Object[]{
                         dto.getProductId(),
                         dto.getProductName(),
-                        vnMap.getOrDefault(dto.getProductId(), "Chưa có tên VN"),
-                        dto.getPrice(), // ✨ Giữ nguyên kiểu BigDecimal
+                        dto.getPrice(),
                         dto.getCategoryName()
                 });
             }
+
+            // Thiết lập lại Renderer sau khi thay đổi cột
+            DefaultTableCellRenderer centerRenderer = new DefaultTableCellRenderer();
+            centerRenderer.setHorizontalAlignment(SwingConstants.CENTER);
+            productTable.getColumnModel().getColumn(0).setCellRenderer(centerRenderer);
+
+            DefaultTableCellRenderer priceRenderer = new DefaultTableCellRenderer();
+            priceRenderer.setHorizontalAlignment(SwingConstants.RIGHT);
+            productTable.getColumnModel().getColumn(2).setCellRenderer(priceRenderer);
+
+            productTable.getColumnModel().getColumn(0).setMaxWidth(80);
+
         } catch (Exception e) {
             e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Lỗi khi tải danh sách sản phẩm: " + e.getMessage(), "Lỗi", JOptionPane.ERROR_MESSAGE);
         } finally {
             isLoading = false;
-            // ✨ Khôi phục lại dòng đã chọn
             if (selectedRow != -1 && selectedRow < productTable.getRowCount()) {
                 productTable.setRowSelectionInterval(selectedRow, selectedRow);
             }
@@ -256,27 +392,46 @@ public class ProductUI extends JFrame {
     }
 
     // ====== LISTENER CRUD ======
+
     private class AddProductListener implements ActionListener {
         @Override
         public void actionPerformed(ActionEvent e) {
-            String en = enNameField.getText().trim(), vn = vnNameField.getText().trim(), priceStr = priceField.getText().trim();
-            if (en.isEmpty() || priceStr.isEmpty()) {
+            String enName = translationFieldsMap.getOrDefault("en", new JTextField()).getText().trim();
+            String priceStr = priceField.getText().trim();
+
+            if (enName.isEmpty() || priceStr.isEmpty()) {
                 JOptionPane.showMessageDialog(ProductUI.this, "Vui lòng nhập tên EN và Giá!", "Thiếu thông tin", JOptionPane.WARNING_MESSAGE);
                 return;
             }
+
             try {
                 BigDecimal price = new BigDecimal(priceStr);
                 String catName = (String) categoryCombo.getSelectedItem();
+
                 if (catName == null || !categoryMap.containsKey(catName)) {
                     JOptionPane.showMessageDialog(ProductUI.this, "Danh mục không hợp lệ!", "Lỗi", JOptionPane.ERROR_MESSAGE);
                     return;
                 }
-                ProductCategory cat = categoryDAO.getById(categoryMap.get(catName)).orElseThrow(() -> new IllegalStateException("Category not found"));
+
+                ProductCategory cat = categoryDAO.getById(categoryMap.get(catName))
+                        .orElseThrow(() -> new IllegalStateException("Category not found"));
+
+                // 1. Tạo và Lưu Product gốc
                 Product p = new Product(price, BigDecimal.ZERO, cat);
                 productDAO.saveProduct(p);
-                productService.saveOrUpdateTranslation(p.getProductId(), "en", en, "EN description placeholder");
-                if (!vn.isEmpty())
-                    productService.saveOrUpdateTranslation(p.getProductId(), "vi", vn, "VN description placeholder");
+                Integer newProductId = p.getProductId();
+
+                // 2. Lưu tất cả các bản dịch từ form
+                for (Map.Entry<String, JTextField> entry : translationFieldsMap.entrySet()) {
+                    String langCode = entry.getKey();
+                    String name = entry.getValue().getText().trim();
+
+                    if (!name.isEmpty()) {
+                        String descPlaceholder = "Mô tả tự động cho " + langCode.toUpperCase() + " (Thêm mới)";
+                        productService.saveOrUpdateTranslation(newProductId, langCode, name, descPlaceholder);
+                    }
+                }
+
                 JOptionPane.showMessageDialog(ProductUI.this, "✅ Thêm sản phẩm thành công!");
                 clearForm();
                 loadProducts();
@@ -297,9 +452,28 @@ public class ProductUI extends JFrame {
                 return;
             }
             Integer id = Integer.parseInt(idField.getText());
+
+            // Kiểm tra tên EN (BẮT BUỘC)
+            String enName = translationFieldsMap.getOrDefault("en", new JTextField()).getText().trim();
+            if (enName.isEmpty()) {
+                JOptionPane.showMessageDialog(ProductUI.this, "Tên sản phẩm Tiếng Anh không được để trống!", "Lỗi Dữ liệu", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+
             try {
-                productService.saveOrUpdateTranslation(id, "en", enNameField.getText(), "EN updated");
-                productService.saveOrUpdateTranslation(id, "vi", vnNameField.getText(), "VN updated");
+                // Chỉ cập nhật bản dịch (Giá và Danh mục bị vô hiệu hóa trong form)
+                for (Map.Entry<String, JTextField> entry : translationFieldsMap.entrySet()) {
+                    String langCode = entry.getKey();
+                    String name = entry.getValue().getText().trim();
+
+                    // Cập nhật hoặc thêm mới bản dịch nếu có nội dung
+                    if (!name.isEmpty()) {
+                        String descPlaceholder = "Mô tả cập nhật cho " + langCode.toUpperCase();
+                        productService.saveOrUpdateTranslation(id, langCode, name, descPlaceholder);
+                    }
+                    // Nếu trường trống (Và không phải EN), ta bỏ qua, giữ lại bản dịch cũ nếu có.
+                }
+
                 JOptionPane.showMessageDialog(ProductUI.this, "💾 Cập nhật thành công!");
                 loadProducts();
                 clearForm();
@@ -318,10 +492,10 @@ public class ProductUI extends JFrame {
                 return;
             }
             Integer id = Integer.parseInt(idField.getText());
-            int confirmation = JOptionPane.showConfirmDialog(ProductUI.this, "Bạn có chắc chắn muốn xóa sản phẩm có ID " + id + "?", "Xác nhận xóa", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+            int confirmation = JOptionPane.showConfirmDialog(ProductUI.this, "Bạn có chắc chắn muốn xóa sản phẩm có ID " + id + "? (Xóa tất cả bản dịch liên quan)", "Xác nhận xóa", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
             if (confirmation == JOptionPane.YES_OPTION) {
                 try {
-                    productDAO.deleteProduct(id);
+                    productService.deleteProduct(id);
                     JOptionPane.showMessageDialog(ProductUI.this, "🗑️ Đã xóa sản phẩm thành công!");
                     loadProducts();
                     clearForm();
@@ -335,14 +509,15 @@ public class ProductUI extends JFrame {
 
     private void clearForm() {
         idField.setText("");
-        enNameField.setText("");
-        vnNameField.setText("");
         priceField.setText("");
         priceField.setEnabled(true);
         categoryCombo.setEnabled(true);
         if (categoryCombo.getItemCount() > 0) {
             categoryCombo.setSelectedIndex(0);
         }
+
+        translationFieldsMap.values().forEach(field -> field.setText(""));
+
         productTable.clearSelection();
     }
 

@@ -54,6 +54,7 @@ public class ProductDAO {
         Transaction tx = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             tx = session.beginTransaction();
+            // Sử dụng merge để xử lý cả trường hợp mới và cập nhật
             session.merge(translation);
             tx.commit();
         } catch (Exception e) {
@@ -97,24 +98,55 @@ public class ProductDAO {
         }
     }
 
-    // Xóa sản phẩm và translations liên quan - Tự quản lý Session (dùng cho UI)
+    public void updateTranslation(ProductTranslation translation) {
+        saveTranslation(translation);
+    }
+
+    public List<Product> getAllProducts() {
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            // Truy vấn tất cả Product, dùng HQL để đảm bảo
+            return session.createQuery("FROM Product p ORDER BY p.productId", Product.class)
+                    .getResultList();
+        } catch (Exception e) {
+            e.printStackTrace();
+            throw new RuntimeException("Lỗi khi lấy tất cả Product: " + e.getMessage(), e);
+        }
+    }
+
+    // --- PHƯƠNG THỨC XÓA (Giải quyết lỗi) ---
+
+    // ✨ PHƯƠNG THỨC MỚI: Xóa tất cả các bản dịch của một sản phẩm
+    public void deleteTranslationsByProductId(Integer productId) {
+        Transaction tx = null;
+        try (Session session = HibernateUtil.getSessionFactory().openSession()) {
+            tx = session.beginTransaction();
+            // HQL để xóa nhanh các bản dịch liên quan
+            session.createQuery("DELETE FROM ProductTranslation pt WHERE pt.product.productId = :productId")
+                    .setParameter("productId", productId)
+                    .executeUpdate();
+            tx.commit();
+        } catch (Exception e) {
+            if (tx != null) tx.rollback();
+            e.printStackTrace();
+            throw new RuntimeException("Lỗi khi xóa bản dịch của sản phẩm: " + e.getMessage(), e);
+        }
+    }
+
+    // Xóa sản phẩm gốc (Đã có sẵn, nhưng giờ được gọi sau khi xóa bản dịch)
     public void deleteProduct(Integer productId) {
         Transaction tx = null;
         try (Session session = HibernateUtil.getSessionFactory().openSession()) {
             tx = session.beginTransaction();
             Product product = session.get(Product.class, productId);
             if (product != null) {
+                // Sử dụng remove để xóa Entity
                 session.remove(product);
             }
             tx.commit();
         } catch (Exception e) {
             if (tx != null) tx.rollback();
             e.printStackTrace();
-            throw new RuntimeException("Lỗi khi xóa sản phẩm", e);
+            throw new RuntimeException("Lỗi khi xóa sản phẩm gốc: " + e.getMessage(), e);
         }
-    }
-
-    public void updateTranslation(ProductTranslation translation) {
-        saveTranslation(translation);
     }
 }

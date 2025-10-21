@@ -30,23 +30,35 @@ public class ProductService {
 
     /**
      * TÍNH NĂNG 1: Lấy danh sách sản phẩm đã được dịch cho giao diện người dùng.
+     * ĐÃ SỬA: Luôn hiển thị TẤT CẢ sản phẩm và sử dụng FALLBACK nếu bản dịch không tồn tại.
      */
     public List<ProductDisplayDTO> getProductsForDisplay(String langCode) {
-        // Lấy tất cả các bản dịch cho ngôn ngữ yêu cầu
-        List<ProductTranslation> translations = productDAO.getProductsByLanguage(langCode);
+        // 1. Lấy TẤT CẢ các sản phẩm gốc (Sử dụng phương thức DAO mới)
+        List<Product> products = productDAO.getAllProducts();
 
-        // Chuyển đổi kết quả thành DTO
-        return translations.stream()
-                .map(pt -> {
-                    Product p = pt.getProduct();
+        // 2. Chuyển đổi kết quả sang DTO với logic Fallback
+        return products.stream()
+                .map(p -> {
+                    // 3. Cố gắng lấy bản dịch cho ngôn ngữ hiện tại
+                    Optional<ProductTranslation> translationOpt = productDAO.getTranslationByIdAndLang(p.getProductId(), langCode);
 
-                    // Lấy tên Category tương ứng
+                    String productName;
+                    // 4. Logic FALLBACK: Nếu không tìm thấy bản dịch (VI, ZH,...)
+                    if (translationOpt.isPresent()) {
+                        productName = translationOpt.get().getProductName();
+                    } else {
+                        // 5. Thử Fallback về Tiếng Anh (en)
+                        productName = productDAO.getTranslationByIdAndLang(p.getProductId(), "en")
+                                .map(ProductTranslation::getProductName)
+                                .orElse("Tên sản phẩm không tìm thấy [ID: " + p.getProductId() + "]");
+                    }
+
+                    // 6. Lấy tên Category (đã có Fallback trong phương thức helper)
                     String categoryName = getCategoryNameWithFallback(p.getCategory().getProductCategoryId(), langCode);
 
-                    // Sử dụng constructor 4 tham số đã thống nhất
                     return new ProductDisplayDTO(
                             p.getProductId(),
-                            pt.getProductName(),
+                            productName,
                             p.getPrice(),
                             categoryName
                     );
@@ -91,11 +103,9 @@ public class ProductService {
     public void saveOrUpdateTranslation(Integer productId, String langCode, String productName, String productDescription) {
 
         // 1. Lấy Entity gốc và Language Entity (DAO tự quản lý Session)
-        // **LƯU Ý:** Nếu MainApp không flush/commit trước đó, productDAO.getProductById(productId) sẽ trả về rỗng!
         Optional<Product> productOpt = productDAO.getProductById(productId);
         Language language = languageDAO.getByCode(langCode);
 
-        // Dòng kiểm tra này là nguyên nhân gây ra lỗi Runtime nếu MainApp chưa flush/commit!
         if (productOpt.isEmpty() || language == null) {
             throw new IllegalArgumentException("Product ID hoặc Language Code không hợp lệ.");
         }
@@ -122,8 +132,14 @@ public class ProductService {
         productDAO.saveTranslation(translation);
     }
 
+    // ✨ PHƯƠNG THỨC: Xóa Sản phẩm và Bản dịch liên quan
+    public void deleteProduct(Integer productId) {
+        productDAO.deleteTranslationsByProductId(productId);
+        productDAO.deleteProduct(productId);
+    }
+
     /**
-     * TÍNH NĂNG 2: Thêm ngôn ngữ mới.
+     * TÍNH NĂNG 4: Thêm ngôn ngữ mới.
      */
     public void addNewLanguage(String code, String name) {
         if (languageDAO.getByCode(code) != null) {
