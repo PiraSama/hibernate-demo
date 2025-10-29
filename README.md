@@ -2,6 +2,8 @@
 
 Dự án **Hibernate Demo** minh họa cách sử dụng **Hibernate ORM** trong Java để ánh xạ (mapping) các lớp đối tượng sang bảng trong cơ sở dữ liệu, thực hiện các thao tác CRUD (Create, Read, Update, Delete).
 
+![Hibernate demo UI](ui-demoHibernate.png)
+
 ---
 
 ## 🧠 Giới thiệu
