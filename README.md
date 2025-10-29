@@ -74,6 +74,7 @@ Chạy MainApp trước để tạo dữ liệu mẫu (Lưu ý chạy 1 lần)
 Sau đó, Chạy ProductUI để hiện ra giao diện
 
 ---
+
 ## 📂 Cấu trúc dự án
 org.example.multilangproduct
 │
@@ -103,6 +104,7 @@ org.example.multilangproduct
 └── MainApp.java             → Điểm chạy chương trình
 
 ---
+
 ##🤝 Góp phần & Issue
 Nếu bạn phát hiện lỗi hoặc muốn đóng góp thêm ví dụ, hãy:
 
